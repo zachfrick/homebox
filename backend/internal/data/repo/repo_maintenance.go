@@ -60,7 +60,8 @@ func (r *MaintenanceEntryRepository) GetAllMaintenance(ctx context.Context, grou
 		))
 	case MaintenanceFilterStatusOverdue:
 		query = query.Where(
-			maintenanceentry.ScheduledDateLT(time.Now()),
+			maintenanceentry.ScheduledDateGT(time.Time{}),
+			maintenanceentry.ScheduledDateLT(maintenanceToday()),
 			maintenanceentry.Or(
 				maintenanceentry.DateIsNil(),
 				maintenanceentry.DateEQ(time.Time{}),

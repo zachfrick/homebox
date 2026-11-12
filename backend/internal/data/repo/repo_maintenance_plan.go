@@ -13,6 +13,7 @@ import (
 	"github.com/sysadminsmedia/homebox/backend/internal/data/ent/maintenanceentry"
 	"github.com/sysadminsmedia/homebox/backend/internal/data/ent/maintenanceplan"
 	"github.com/sysadminsmedia/homebox/backend/internal/data/types"
+	"github.com/sysadminsmedia/homebox/backend/internal/sys/validate"
 )
 
 type MaintenancePlanIntervalUnit string
@@ -26,6 +27,8 @@ const (
 )
 
 type MaintenancePlanCreate struct {
+	CompletedDate       types.Date                  `json:"completedDate"`
+	Cost                float64                     `json:"cost,string"`
 	Name                string                      `json:"name"                          validate:"required"`
 	Description         string                      `json:"description"`
 	IntervalValue       int                         `json:"intervalValue"                 validate:"required,min=1"`
@@ -57,42 +60,62 @@ type MaintenancePlan struct {
 }
 
 func (mc MaintenancePlanCreate) Validate() error {
-	if mc.IntervalValue < 1 {
-		return errors.New("intervalValue must be greater than 0")
+	base := mc.CompletedDate.Time()
+	if base.IsZero() {
+		base = mc.StartDate.Time()
 	}
-
-	return validateMaintenancePlanUnit(mc.IntervalUnit)
+	return validateMaintenanceInterval(base, mc.IntervalValue, mc.IntervalUnit)
 }
 
 func (mu MaintenancePlanUpdate) Validate() error {
-	if mu.IntervalValue < 1 {
-		return errors.New("intervalValue must be greater than 0")
+	base := time.Time{}
+	if mu.NextDueAt != nil {
+		base = mu.NextDueAt.Time()
 	}
-
-	return validateMaintenancePlanUnit(mu.IntervalUnit)
+	return validateMaintenanceInterval(base, mu.IntervalValue, mu.IntervalUnit)
 }
 
-func validateMaintenancePlanUnit(unit MaintenancePlanIntervalUnit) error {
+func validateMaintenanceInterval(base time.Time, value int, unit MaintenancePlanIntervalUnit) error {
+	// Bound arithmetic before multiplying. Calendar dates are four-digit years.
+	maximum := 0
 	switch unit {
-	case MaintenancePlanIntervalUnitHour,
-		MaintenancePlanIntervalUnitDay,
-		MaintenancePlanIntervalUnitWeek,
-		MaintenancePlanIntervalUnitMonth,
-		MaintenancePlanIntervalUnitYear:
-		return nil
+	case MaintenancePlanIntervalUnitHour:
+		maximum = 24 * 366 * 9999
+		if value%24 != 0 {
+			return errors.New("hour intervals must be whole days (multiples of 24)")
+		}
+	case MaintenancePlanIntervalUnitDay:
+		maximum = 366 * 9999
+	case MaintenancePlanIntervalUnitWeek:
+		maximum = 53 * 9999
+	case MaintenancePlanIntervalUnitMonth:
+		maximum = 12 * 9999
+	case MaintenancePlanIntervalUnitYear:
+		maximum = 9999
 	default:
 		return errors.New("invalid intervalUnit")
 	}
+	if value < 1 || value > maximum {
+		return errors.New("intervalValue is outside the supported range")
+	}
+	if base.IsZero() {
+		base = maintenanceToday()
+	}
+	next := computeNextDue(base.UTC(), value, unit)
+	if next.Year() > 9999 || next.Year() < 1 || !next.After(base) {
+		return errors.New("next maintenance date is outside the supported range")
+	}
+	return nil
 }
 
 func mapMaintenancePlan(entry *ent.MaintenancePlan) MaintenancePlan {
 	last := time.Time{}
 	next := time.Time{}
 	if entry.LastCompletedAt != nil {
-		last = *entry.LastCompletedAt
+		last = entry.LastCompletedAt.UTC()
 	}
 	if entry.NextDueAt != nil {
-		next = *entry.NextDueAt
+		next = entry.NextDueAt.UTC()
 	}
 
 	return MaintenancePlan{
@@ -142,6 +165,13 @@ func ownedPlan(ctx context.Context, db *ent.Client, gid, planID uuid.UUID) (*ent
 		Only(ctx)
 }
 
+// lockMaintenancePlan acquires a transactional write lock without changing the
+// interval. Both SQLite and PostgreSQL support this; acquire it before touching
+// an occurrence so completion and plan editing use the same lock order.
+func lockMaintenancePlan(ctx context.Context, db *ent.Client, planID uuid.UUID) error {
+	return db.MaintenancePlan.UpdateOneID(planID).AddIntervalValue(0).Exec(ctx)
+}
+
 // withTx runs fn inside a transaction, committing on success and rolling
 // back on error.
 func (r *MaintenanceEntryRepository) withTx(ctx context.Context, fn func(db *ent.Client) error) error {
@@ -149,6 +179,8 @@ func (r *MaintenanceEntryRepository) withTx(ctx context.Context, fn func(db *ent
 	if err != nil {
 		return err
 	}
+
+	defer func() { _ = tx.Rollback() }()
 
 	if err := fn(tx.Client()); err != nil {
 		if rbErr := tx.Rollback(); rbErr != nil {
@@ -167,6 +199,10 @@ func (r *MaintenanceEntryRepository) CreatePlan(ctx context.Context, gid, itemID
 	}
 	if !owned {
 		return MaintenancePlan{}, &ent.NotFoundError{}
+	}
+
+	if err := input.Validate(); err != nil {
+		return MaintenancePlan{}, validate.NewFieldErrors(validate.NewFieldError("intervalValue", err.Error()))
 	}
 
 	base := input.StartDate.Time()
@@ -203,10 +239,40 @@ func (r *MaintenanceEntryRepository) CreatePlan(ctx context.Context, gid, itemID
 			if err != nil {
 				return fmt.Errorf("link existing maintenance entry: %w", err)
 			}
-			_, err = db.MaintenanceEntry.UpdateOneID(existing.ID).
-				SetPlanID(plan.ID).
-				SetScheduledDate(firstDue).
-				Save(ctx)
+			if existing.PlanID != nil {
+				return validate.NewFieldErrors(validate.NewFieldError("linkExistingEntryID", "entry already belongs to a plan"))
+			}
+			link := db.MaintenanceEntry.UpdateOneID(existing.ID).Where(maintenanceentry.PlanIDIsNil()).SetPlanID(plan.ID)
+			if existing.Date.IsZero() {
+				link.Where(maintenanceentry.Or(maintenanceentry.DateIsNil(), maintenanceentry.DateEQ(time.Time{})))
+			} else {
+				link.Where(maintenanceentry.DateEQ(existing.Date))
+			}
+			if existing.ScheduledDate.IsZero() {
+				link.Where(maintenanceentry.Or(maintenanceentry.ScheduledDateIsNil(), maintenanceentry.ScheduledDateEQ(time.Time{})))
+			} else {
+				link.Where(maintenanceentry.ScheduledDateEQ(existing.ScheduledDate))
+			}
+			if _, err = link.Save(ctx); err != nil {
+				return err
+			}
+			if !existing.Date.IsZero() {
+				if err := rollPlanFromCompletion(ctx, db, plan.ID, existing.Date.UTC(), itemID); err != nil {
+					return err
+				}
+			} else {
+				due := existing.ScheduledDate
+				if due.IsZero() {
+					due = firstDue
+					if err := db.MaintenanceEntry.UpdateOneID(existing.ID).SetScheduledDate(due).Exec(ctx); err != nil {
+						return err
+					}
+				}
+				if err := db.MaintenancePlan.UpdateOneID(plan.ID).SetNextDueAt(due).Exec(ctx); err != nil {
+					return err
+				}
+			}
+			plan, err = db.MaintenancePlan.Get(ctx, plan.ID)
 			return err
 		}
 
@@ -216,8 +282,18 @@ func (r *MaintenanceEntryRepository) CreatePlan(ctx context.Context, gid, itemID
 			SetName(plan.Name).
 			SetDescription(plan.Description).
 			SetScheduledDate(firstDue).
-			SetDate(time.Time{}).
+			SetDate(input.CompletedDate.Time()).
+			SetCost(input.Cost).
 			Save(ctx)
+		if err != nil {
+			return err
+		}
+		if !input.CompletedDate.Time().IsZero() {
+			if err := rollPlanFromCompletion(ctx, db, plan.ID, input.CompletedDate.Time(), itemID); err != nil {
+				return err
+			}
+			plan, err = db.MaintenancePlan.Get(ctx, plan.ID)
+		}
 		return err
 	})
 	if err != nil {
@@ -228,30 +304,66 @@ func (r *MaintenanceEntryRepository) CreatePlan(ctx context.Context, gid, itemID
 }
 
 func (r *MaintenanceEntryRepository) UpdatePlan(ctx context.Context, gid, planID uuid.UUID, input MaintenancePlanUpdate) (MaintenancePlan, error) {
-	if _, err := ownedPlan(ctx, r.db, gid, planID); err != nil {
-		return MaintenancePlan{}, err
-	}
-
-	up := r.db.MaintenancePlan.UpdateOneID(planID).
-		SetName(input.Name).
-		SetDescription(input.Description).
-		SetIntervalValue(input.IntervalValue).
-		SetIntervalUnit(maintenanceplan.IntervalUnit(input.IntervalUnit)).
-		SetActive(input.Active)
-	if input.NextDueAt != nil {
-		t := input.NextDueAt.Time()
-		if t.IsZero() {
-			up = up.ClearNextDueAt()
-		} else {
-			up = up.SetNextDueAt(t.UTC())
+	var plan *ent.MaintenancePlan
+	err := r.withTx(ctx, func(db *ent.Client) error {
+		if _, err := ownedPlan(ctx, db, gid, planID); err != nil {
+			return err
 		}
-	}
-
-	plan, err := up.Save(ctx)
+		if err := lockMaintenancePlan(ctx, db, planID); err != nil {
+			return err
+		}
+		current, err := ownedPlan(ctx, db, gid, planID)
+		if err != nil {
+			return err
+		}
+		if err := input.Validate(); err != nil {
+			return validate.NewFieldErrors(validate.NewFieldError("intervalValue", err.Error()))
+		}
+		if input.NextDueAt != nil && input.NextDueAt.Time().IsZero() {
+			return validate.NewFieldErrors(validate.NewFieldError("nextDueAt", "next due date cannot be empty"))
+		}
+		up := db.MaintenancePlan.UpdateOneID(planID).SetName(input.Name).SetDescription(input.Description).
+			SetIntervalValue(input.IntervalValue).SetIntervalUnit(maintenanceplan.IntervalUnit(input.IntervalUnit)).SetActive(input.Active)
+		if input.NextDueAt != nil {
+			due := input.NextDueAt.Time()
+			up.SetNextDueAt(due)
+			_, err := db.MaintenanceEntry.Update().Where(maintenanceentry.PlanIDEQ(planID), maintenanceentry.Or(maintenanceentry.DateIsNil(), maintenanceentry.DateEQ(time.Time{}))).SetScheduledDate(due).Save(ctx)
+			if err != nil {
+				return err
+			}
+		}
+		plan, err = up.Save(ctx)
+		if err != nil {
+			return err
+		}
+		// A plan completed while paused has no pending entry. Resuming must create it.
+		if input.Active && !current.Active && current.LastCompletedAt != nil {
+			count, err := db.MaintenanceEntry.Query().Where(maintenanceentry.PlanIDEQ(planID), maintenanceentry.Or(maintenanceentry.DateIsNil(), maintenanceentry.DateEQ(time.Time{}))).Count(ctx)
+			if err != nil {
+				return err
+			}
+			if count == 0 {
+				if input.NextDueAt != nil {
+					_, err = db.MaintenanceEntry.Create().SetEntityID(current.EntityID).SetPlanID(planID).
+						SetName(plan.Name).SetDescription(plan.Description).SetDate(time.Time{}).
+						SetScheduledDate(input.NextDueAt.Time()).Save(ctx)
+				} else {
+					err = rollPlanFromCompletion(ctx, db, planID, current.LastCompletedAt.UTC(), current.EntityID)
+				}
+				if err != nil {
+					return err
+				}
+				plan, err = db.MaintenancePlan.Get(ctx, planID)
+				if err != nil {
+					return err
+				}
+			}
+		}
+		return err
+	})
 	if err != nil {
 		return MaintenancePlan{}, err
 	}
-
 	return mapMaintenancePlan(plan), nil
 }
 
@@ -293,6 +405,9 @@ func validatePlanForEntity(ctx context.Context, db *ent.Client, planID, entityID
 // and creates the next open entry. The caller must have verified that the plan
 // belongs to entityID.
 func rollPlanFromCompletion(ctx context.Context, db *ent.Client, planID uuid.UUID, completedAt time.Time, entityID uuid.UUID) error {
+	if err := lockMaintenancePlan(ctx, db, planID); err != nil {
+		return err
+	}
 	plan, err := db.MaintenancePlan.Query().
 		Where(maintenanceplan.ID(planID), maintenanceplan.EntityIDEQ(entityID)).
 		Only(ctx)
@@ -307,7 +422,10 @@ func rollPlanFromCompletion(ctx context.Context, db *ent.Client, planID uuid.UUI
 			Exec(ctx)
 	}
 
-	nextDue := computeNextDue(completedAt, plan.IntervalValue, MaintenancePlanIntervalUnit(plan.IntervalUnit))
+	if err := validateMaintenanceInterval(completedAt, plan.IntervalValue, MaintenancePlanIntervalUnit(plan.IntervalUnit)); err != nil {
+		return validate.NewFieldErrors(validate.NewFieldError("completedDate", err.Error()))
+	}
+	nextDue := computeNextDue(completedAt.UTC(), plan.IntervalValue, MaintenancePlanIntervalUnit(plan.IntervalUnit))
 	updated, err := db.MaintenancePlan.UpdateOneID(planID).
 		SetLastCompletedAt(completedAt).
 		SetNextDueAt(nextDue).
@@ -360,7 +478,7 @@ func addMonthsClamped(t time.Time, n int) time.Time {
 func computeNextDue(base time.Time, intervalValue int, intervalUnit MaintenancePlanIntervalUnit) time.Time {
 	switch intervalUnit {
 	case MaintenancePlanIntervalUnitHour:
-		return base.Add(time.Duration(intervalValue) * time.Hour)
+		return base.AddDate(0, 0, intervalValue/24).Add(time.Duration(intervalValue%24) * time.Hour)
 	case MaintenancePlanIntervalUnitDay:
 		return base.AddDate(0, 0, intervalValue)
 	case MaintenancePlanIntervalUnitWeek:

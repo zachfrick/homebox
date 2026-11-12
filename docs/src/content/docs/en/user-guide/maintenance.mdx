@@ -1,0 +1,53 @@
+---
+title: Maintenance plans
+---
+
+Enable **Recurring Plan** when adding maintenance to an item. Choose the interval
+in calendar days, weeks, months, or years and set the first scheduled date.
+Completing an occurrence creates the next one, measured from the actual completion
+date. Month and year intervals clamp to the end of a shorter month: August 31 plus
+six months is February 28 (or 29 in a leap year).
+
+You can enter completed maintenance, its cost, and notes when creating a plan.
+The completed record is kept and the next occurrence is scheduled automatically.
+Converting an existing entry to a plan preserves its historical dates and cost.
+
+Editing a completed record changes that record, not the plan's name, interval, or
+next due date. Recurring history cannot be reopened while linked to a plan because
+its successor may already exist. A standalone record can still be reopened.
+
+Uncheck **Recurring Plan** to pause an existing plan. Paused plans keep their
+history and pending occurrence, but send no maintenance reminders. Completing a
+paused occurrence does not create another. Check the option again to resume;
+if there is no pending occurrence, one is scheduled from the last completion.
+
+## Different cartridge replacement intervals
+
+For a water filter with two six-month cartridges, one annual cartridge and one
+two-year cartridge, three plans can group the work into visits. If all cartridges
+were replaced on January 1, 2026:
+
+| Plan | First visit | Repeat |
+| --- | --- | --- |
+| Replace the two six-month cartridges | July 1, 2026 | Every year |
+| Replace those two plus the annual cartridge | January 1, 2027 | Every two years |
+| Replace all four cartridges | January 1, 2028 | Every two years |
+
+The visits replace 2, 3, 2, then 4 cartridges, repeating every two years. These are
+independent plans: a delayed completion shifts that plan's subsequent date. They
+do not enforce a shared fixed calendar or a strict alternating sequence.
+
+## API notes
+
+- Entry updates replace the supplied entry fields, so empty notes, zero cost, and
+  empty dates are meaningful. At least one of the scheduled/completed dates is
+  required. Omit `planID` to retain the association; an explicit nil UUID detaches
+  it. Use plan creation with `linkExistingEntryID` to convert a standalone entry.
+- Plan creation accepts `completedDate` and `cost` for the first entry. When
+  linking an existing entry, its own fields take precedence.
+- An explicit `nextDueAt` update also moves the pending occurrence, without
+  rewriting completed history. An interval change applies to future completions.
+- Dates are calendar dates. The API accepts hour intervals only as whole days
+  (multiples of 24); use day intervals in new clients. Intervals that overflow the
+  supported four-digit calendar range are rejected.
+- Plans and their entry associations are included in group export/import.

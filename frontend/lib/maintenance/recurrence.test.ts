@@ -1,8 +1,14 @@
 import { describe, expect, it } from "vitest";
 import { MaintenancePlanIntervalUnit } from "~~/lib/api/types/data-contracts";
 import { getNextNDueDates } from "./recurrence";
+import { parseDateOnly, toDateOnlyString } from "../datelib/dateOnly";
 
 describe("getNextNDueDates", () => {
+  it("keeps local calendar month ends for six-month maintenance", () => {
+    const first = parseDateOnly("2026-08-31")!;
+    const dates = getNextNDueDates(first, 6, MaintenancePlanIntervalUnit.Month, 2);
+    expect(dates.map(toDateOnlyString)).toEqual(["2026-08-31", "2027-02-28"]);
+  });
   it("includes scheduled date as the first due date", () => {
     const scheduledDate = new Date("2026-03-10T09:30:00Z");
     const dueDates = getNextNDueDates(scheduledDate, 1, MaintenancePlanIntervalUnit.Week, 3);

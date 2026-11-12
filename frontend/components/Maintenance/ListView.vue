@@ -185,6 +185,7 @@
   );
 
   function openMaintenanceModalForCurrentItem() {
+    if (!props.currentItemId) return;
     openDialog(DialogID.EditMaintenance, {
       params: { type: "create", itemId: props.currentItemId },
       onClose: result => {
