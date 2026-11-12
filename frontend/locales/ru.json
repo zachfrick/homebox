@@ -733,7 +733,8 @@
         "filter": {
             "both": "Оба",
             "completed": "Завершено",
-            "scheduled": "Запланировано"
+            "scheduled": "Запланировано",
+            "overdue": "Просроченные"
         },
         "list": {
             "complete": "Завершить",
@@ -741,7 +742,9 @@
             "delete": "Удалить",
             "duplicate": "Дубликат",
             "edit": "Изменить",
-            "new": "Новое"
+            "new": "Новое",
+            "overdue": "Просрочено",
+            "overdue_since": "Просрочено с"
         },
         "modal": {
             "completed_date": "Дата завершения",
@@ -753,7 +756,17 @@
             "new_action": "Создать",
             "new_title": "Новая запись",
             "notes": "Заметки",
-            "scheduled_date": "Планируемая дата"
+            "scheduled_date": "Планируемая дата",
+            "plan_load_failed": "Не удалось загрузить расписание. Повторите загрузку перед сохранением.",
+            "retry": "Повторить",
+            "recurring": "Повторяющееся обслуживание",
+            "interval_value": "Каждые",
+            "interval_day": "дн.",
+            "interval_week": "нед.",
+            "interval_month": "мес.",
+            "interval_year": "г.",
+            "interval_hour": "ч.",
+            "next_scheduled_dates": "Следующие даты обслуживания"
         },
         "monthly_average": "Среднемесячный показатель",
         "toast": {

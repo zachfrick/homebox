@@ -1144,7 +1144,9 @@
             "next_scheduled_dates": "Next scheduled dates",
             "notes": "Notes",
             "recurring": "Recurring Plan",
-            "scheduled_date": "Scheduled Date"
+            "scheduled_date": "Scheduled Date",
+            "plan_load_failed": "Could not load the maintenance plan. Retry before saving.",
+            "retry": "Retry"
         },
         "monthly_average": "Monthly Average",
         "toast": {

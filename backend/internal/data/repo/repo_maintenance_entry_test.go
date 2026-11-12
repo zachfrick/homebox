@@ -160,7 +160,7 @@ func TestMaintenanceEntryRepository_Update_RecurringCompletionCreatesNextEntry(t
 		Cost:          initialEntry.Cost,
 		ScheduledDate: types.DateFromTime(initialEntry.ScheduledDate),
 		CompletedDate: completedAt,
-		PlanID:        plan.ID,
+		PlanID:        &plan.ID,
 	})
 	require.NoError(t, err)
 

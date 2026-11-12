@@ -161,10 +161,16 @@ var exportTables = []tableSpec{
 		fkCols: map[string]string{"entity_fields": entitiesTable},
 	},
 	{
-		name:   "maintenance_entries",
+		name:   "maintenance_plans",
 		scope:  "entity_id IN (SELECT id FROM entities WHERE group_entities = ?)",
 		pkCol:  "id",
 		fkCols: map[string]string{"entity_id": entitiesTable},
+	},
+	{
+		name:   "maintenance_entries",
+		scope:  "entity_id IN (SELECT id FROM entities WHERE group_entities = ?)",
+		pkCol:  "id",
+		fkCols: map[string]string{"entity_id": entitiesTable, "plan_id": "maintenance_plans"},
 	},
 	{
 		// Two-part scope: the regular attachments owned by an entity in this

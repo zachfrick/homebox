@@ -117,7 +117,7 @@ func TestMaintenanceEntry_CannotAttachPlanFromAnotherEntity(t *testing.T) {
 		Name:          entry.Name,
 		ScheduledDate: entry.ScheduledDate,
 		CompletedDate: types.DateFromTime(time.Now().UTC()),
-		PlanID:        plan.ID,
+		PlanID:        &plan.ID,
 	})
 	require.Error(t, err)
 	assert.True(t, ent.IsNotFound(err))

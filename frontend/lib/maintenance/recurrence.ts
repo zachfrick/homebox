@@ -13,22 +13,22 @@ function addInterval(base: Date, intervalValue: number, intervalUnit: Maintenanc
       next.setDate(next.getDate() + intervalValue * 7);
       return next;
     case MaintenancePlanIntervalUnit.Month: {
-      const y = next.getUTCFullYear();
-      const m = next.getUTCMonth();
-      const day = next.getUTCDate();
+      const y = next.getFullYear();
+      const m = next.getMonth();
+      const day = next.getDate();
       const totalMonths = y * 12 + m + intervalValue;
       const ty = Math.floor(totalMonths / 12);
       const tm = totalMonths - ty * 12;
-      const lastDay = new Date(Date.UTC(ty, tm + 1, 0)).getUTCDate();
-      next.setUTCFullYear(ty, tm, Math.min(day, lastDay));
+      const lastDay = new Date(ty, tm + 1, 0).getDate();
+      next.setFullYear(ty, tm, Math.min(day, lastDay));
       return next;
     }
     case MaintenancePlanIntervalUnit.Year: {
-      const y = next.getUTCFullYear() + intervalValue;
-      const m = next.getUTCMonth();
-      const day = next.getUTCDate();
-      const lastDay = new Date(Date.UTC(y, m + 1, 0)).getUTCDate();
-      next.setUTCFullYear(y, m, Math.min(day, lastDay));
+      const y = next.getFullYear() + intervalValue;
+      const m = next.getMonth();
+      const day = next.getDate();
+      const lastDay = new Date(y, m + 1, 0).getDate();
+      next.setFullYear(y, m, Math.min(day, lastDay));
       return next;
     }
     default:

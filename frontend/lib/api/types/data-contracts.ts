@@ -1451,6 +1451,8 @@ export interface MaintenancePlan {
 }
 
 export interface MaintenancePlanCreate {
+  completedDate?: Date | string;
+  cost?: string;
   active: boolean;
   description: string;
   intervalUnit: MaintenancePlanIntervalUnit;

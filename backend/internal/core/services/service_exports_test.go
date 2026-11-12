@@ -21,6 +21,7 @@ import (
 	"github.com/sysadminsmedia/homebox/backend/internal/data/ent/predicate"
 	"github.com/sysadminsmedia/homebox/backend/internal/data/ent/tag"
 	"github.com/sysadminsmedia/homebox/backend/internal/data/repo"
+	"github.com/sysadminsmedia/homebox/backend/internal/data/types"
 )
 
 func tagInGroup(gid uuid.UUID) predicate.Tag {
@@ -64,6 +65,12 @@ func TestExportRoundTrip(t *testing.T) {
 	require.NoError(t, err)
 
 	// Tag and link to the item (exercises the tag_entities junction).
+	plan, err := tRepos.MaintEntry.CreatePlan(ctx, src.ID, item.ID, repo.MaintenancePlanCreate{
+		Name: "Replace filter", IntervalValue: 6, IntervalUnit: repo.MaintenancePlanIntervalUnitMonth,
+		StartDate: types.DateFromString("2026-08-31"), Active: true,
+	})
+	require.NoError(t, err)
+
 	tg, err := tRepos.Tags.Create(ctx, src.ID, repo.TagCreate{
 		Name:        "tools",
 		Description: "stuff that hits other stuff",
@@ -180,6 +187,16 @@ func TestExportRoundTrip(t *testing.T) {
 	// archive into a server that already has the data doesn't conflict on
 	// PK). Names + relationship structure are what matters.
 	assert.NotEqual(t, item.ID, gotItem.ID, "import should remap PKs")
+	importedPlans, err := tRepos.MaintEntry.ListPlansByItemID(ctx, dst.ID, gotItem.ID)
+	require.NoError(t, err)
+	require.Len(t, importedPlans, 1)
+	assert.NotEqual(t, plan.ID, importedPlans[0].ID)
+	assert.Equal(t, plan.IntervalValue, importedPlans[0].IntervalValue)
+	assert.True(t, plan.NextDueAt.Equal(importedPlans[0].NextDueAt))
+	importedEntries, err := tRepos.MaintEntry.GetMaintenanceByItemID(ctx, dst.ID, gotItem.ID, repo.MaintenanceFilters{Status: repo.MaintenanceFilterStatusBoth})
+	require.NoError(t, err)
+	require.Len(t, importedEntries, 1)
+	assert.Equal(t, importedPlans[0].ID, importedEntries[0].PlanID)
 	assert.NotEqual(t, tg.ID, tags[0].ID, "import should remap PKs")
 
 	// Attachment + thumbnail must both round-trip with the parent→thumbnail

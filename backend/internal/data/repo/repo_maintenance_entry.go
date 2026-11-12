@@ -13,6 +13,7 @@ import (
 	"github.com/sysadminsmedia/homebox/backend/internal/data/ent/maintenanceentry"
 	"github.com/sysadminsmedia/homebox/backend/internal/data/ent/maintenanceplan"
 	"github.com/sysadminsmedia/homebox/backend/internal/data/types"
+	"github.com/sysadminsmedia/homebox/backend/internal/sys/validate"
 )
 
 // MaintenanceEntryRepository is a repository for maintenance entries that are
@@ -41,7 +42,7 @@ func (mc MaintenanceEntryCreate) Validate() error {
 type MaintenanceEntryUpdate struct {
 	CompletedDate types.Date `json:"completedDate"`
 	ScheduledDate types.Date `json:"scheduledDate"`
-	PlanID        uuid.UUID  `json:"planID"`
+	PlanID        *uuid.UUID `json:"planID,omitempty"`
 	Name          string     `json:"name"`
 	Description   string     `json:"description"`
 	Cost          float64    `json:"cost,string"`
@@ -96,6 +97,7 @@ func (r *MaintenanceEntryRepository) GetScheduled(ctx context.Context, gid uuid.
 				entity.HasGroupWith(group.ID(gid)),
 			),
 			maintenanceentry.ScheduledDate(dt.Time()),
+			maintenanceentry.Or(maintenanceentry.PlanIDIsNil(), maintenanceentry.HasPlanWith(maintenanceplan.Active(true))),
 			maintenanceentry.Or(
 				maintenanceentry.DateIsNil(),
 				maintenanceentry.DateEQ(time.Time{}),
@@ -164,7 +166,7 @@ func (r *MaintenanceEntryRepository) Create(ctx context.Context, gid, itemID uui
 		if err := validatePlanForEntity(ctx, r.db, input.PlanID, itemID); err != nil {
 			return MaintenanceEntry{}, err
 		}
-		create = create.SetPlanID(input.PlanID)
+		return MaintenanceEntry{}, validate.NewFieldErrors(validate.NewFieldError("planID", "use a maintenance plan to create recurring entries"))
 	}
 
 	item, err := create.Save(ctx)
@@ -172,77 +174,73 @@ func (r *MaintenanceEntryRepository) Create(ctx context.Context, gid, itemID uui
 }
 
 func (r *MaintenanceEntryRepository) Update(ctx context.Context, gid uuid.UUID, id uuid.UUID, input MaintenanceEntryUpdate) (MaintenanceEntry, error) {
-	current, err := r.db.MaintenanceEntry.Query().Where(
-		maintenanceentry.ID(id),
-		maintenanceentry.HasEntityWith(entity.HasGroupWith(group.ID(gid))),
-	).Only(ctx)
-	if err != nil {
-		return MaintenanceEntry{}, err
-	}
-
-	completedDate := input.CompletedDate.Time()
-	if completedDate.IsZero() {
-		completedDate = current.Date
-	}
-
-	scheduledDate := input.ScheduledDate.Time()
-	if scheduledDate.IsZero() {
-		scheduledDate = current.ScheduledDate
-	}
-
-	name := input.Name
-	if name == "" {
-		name = current.Name
-	}
-
-	description := input.Description
-	if description == "" {
-		description = current.Description
-	}
-
-	cost := input.Cost
-	if input.Cost == 0 && current.Cost != 0 {
-		cost = current.Cost
-	}
-
-	if input.PlanID != uuid.Nil {
-		if err := validatePlanForEntity(ctx, r.db, input.PlanID, current.EntityID); err != nil {
-			return MaintenanceEntry{}, err
-		}
-	}
-
 	var item *ent.MaintenanceEntry
-	err = r.withTx(ctx, func(db *ent.Client) error {
-		updater := db.MaintenanceEntry.UpdateOneID(id).
-			SetDate(completedDate).
-			SetScheduledDate(scheduledDate).
-			SetName(name).
-			SetDescription(description).
-			SetCost(cost)
-
-		if input.PlanID != uuid.Nil {
-			updater = updater.SetPlanID(input.PlanID)
-		} else {
-			updater = updater.ClearPlanID()
+	err := r.withTx(ctx, func(db *ent.Client) error {
+		current, err := db.MaintenanceEntry.Query().Where(
+			maintenanceentry.ID(id), maintenanceentry.HasEntityWith(entity.HasGroupWith(group.ID(gid))),
+		).Only(ctx)
+		if err != nil {
+			return err
 		}
-
-		var err error
+		planID := current.PlanID
+		if input.PlanID != nil {
+			planID = input.PlanID
+		}
+		linked := planID != nil && *planID != uuid.Nil
+		if linked {
+			if err := validatePlanForEntity(ctx, db, *planID, current.EntityID); err != nil {
+				return err
+			}
+			if current.PlanID == nil || *current.PlanID != *planID {
+				return validate.NewFieldErrors(validate.NewFieldError("planID", "use plan creation to link an existing entry"))
+			}
+			if err := lockMaintenancePlan(ctx, db, *planID); err != nil {
+				return err
+			}
+			// A successor may already have been completed. Reopening history must not
+			// manufacture another occurrence; detach it explicitly first if needed.
+			if !current.Date.IsZero() && input.CompletedDate.Time().IsZero() {
+				return validate.NewFieldErrors(validate.NewFieldError("completedDate", "detach a recurring entry before reopening it"))
+			}
+		}
+		updater := db.MaintenanceEntry.UpdateOneID(id).
+			SetDate(input.CompletedDate.Time()).SetScheduledDate(input.ScheduledDate.Time()).
+			SetName(input.Name).SetDescription(input.Description).SetCost(input.Cost)
+		// Completion and plan linking must not act on a stale association or date.
+		if current.PlanID == nil {
+			updater.Where(maintenanceentry.PlanIDIsNil())
+		} else {
+			updater.Where(maintenanceentry.PlanIDEQ(*current.PlanID))
+		}
+		if current.Date.IsZero() {
+			updater.Where(maintenanceentry.Or(maintenanceentry.DateIsNil(), maintenanceentry.DateEQ(time.Time{})))
+		} else {
+			updater.Where(maintenanceentry.DateEQ(current.Date))
+		}
+		if input.PlanID != nil {
+			if linked {
+				updater.SetPlanID(*planID)
+			} else {
+				updater.ClearPlanID()
+			}
+		}
 		item, err = updater.Save(ctx)
 		if err != nil {
 			return err
 		}
-
-		if current.Date.IsZero() && !completedDate.IsZero() && item.PlanID != nil && *item.PlanID != uuid.Nil {
-			return rollPlanFromCompletion(ctx, db, *item.PlanID, completedDate, item.EntityID)
+		if linked && current.Date.IsZero() {
+			if !input.CompletedDate.Time().IsZero() {
+				return rollPlanFromCompletion(ctx, db, *planID, input.CompletedDate.Time(), item.EntityID)
+			}
+			// Editing the pending occurrence also moves the plan's next date.
+			return db.MaintenancePlan.UpdateOneID(*planID).SetNextDueAt(input.ScheduledDate.Time()).Exec(ctx)
 		}
-
 		return nil
 	})
 	if err != nil {
 		return MaintenanceEntry{}, err
 	}
-
-	return mapMaintenanceEntryErr(item, nil)
+	return mapMaintenanceEntry(item), nil
 }
 
 func (r *MaintenanceEntryRepository) GetMaintenanceByItemID(ctx context.Context, groupID, itemID uuid.UUID, filters MaintenanceFilters) ([]MaintenanceEntryWithDetails, error) {
@@ -276,7 +274,8 @@ func (r *MaintenanceEntryRepository) GetMaintenanceByItemID(ctx context.Context,
 		)
 	case MaintenanceFilterStatusOverdue:
 		query = query.Where(
-			maintenanceentry.ScheduledDateLT(time.Now()),
+			maintenanceentry.ScheduledDateGT(time.Time{}),
+			maintenanceentry.ScheduledDateLT(maintenanceToday()),
 			maintenanceentry.Or(
 				maintenanceentry.DateIsNil(),
 				maintenanceentry.DateEQ(time.Time{}),
@@ -307,7 +306,7 @@ func isEntryOverdue(completedDate, scheduledDate time.Time) bool {
 	}
 
 	if completedDate.IsZero() {
-		return scheduledDate.Before(time.Now())
+		return scheduledDate.Before(maintenanceToday())
 	}
 
 	return false
@@ -326,3 +325,6 @@ func (r *MaintenanceEntryRepository) Delete(ctx context.Context, gid uuid.UUID, 
 	}
 	return nil
 }
+
+// Calendar dates are stored as UTC midnight; use the same cutoff as notifications.
+func maintenanceToday() time.Time { return types.DateFromTime(time.Now()).Time() }

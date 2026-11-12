@@ -310,6 +310,11 @@ definitions:
         items:
           $ref: '#/definitions/ent.MaintenanceEntry'
         type: array
+      maintenance_plans:
+        description: MaintenancePlans holds the value of the maintenance_plans edge.
+        items:
+          $ref: '#/definitions/ent.MaintenancePlan'
+        type: array
       parent:
         allOf:
         - $ref: '#/definitions/ent.Entity'
@@ -760,6 +765,9 @@ definitions:
       name:
         description: Name holds the value of the "name" field.
         type: string
+      plan_id:
+        description: PlanID holds the value of the "plan_id" field.
+        type: string
       scheduled_date:
         description: ScheduledDate holds the value of the "scheduled_date" field.
         type: string
@@ -773,6 +781,66 @@ definitions:
         allOf:
         - $ref: '#/definitions/ent.Entity'
         description: Entity holds the value of the entity edge.
+      plan:
+        allOf:
+        - $ref: '#/definitions/ent.MaintenancePlan'
+        description: Plan holds the value of the plan edge.
+    type: object
+  ent.MaintenancePlan:
+    properties:
+      active:
+        description: Active holds the value of the "active" field.
+        type: boolean
+      created_at:
+        description: CreatedAt holds the value of the "created_at" field.
+        type: string
+      description:
+        description: Description holds the value of the "description" field.
+        type: string
+      edges:
+        allOf:
+        - $ref: '#/definitions/ent.MaintenancePlanEdges'
+        description: |-
+          Edges holds the relations/edges for other nodes in the graph.
+          The values are being populated by the MaintenancePlanQuery when eager-loading is set.
+      entity_id:
+        description: EntityID holds the value of the "entity_id" field.
+        type: string
+      id:
+        description: ID of the ent.
+        type: string
+      interval_unit:
+        allOf:
+        - $ref: '#/definitions/maintenanceplan.IntervalUnit'
+        description: IntervalUnit holds the value of the "interval_unit" field.
+      interval_value:
+        description: IntervalValue holds the value of the "interval_value" field.
+        type: integer
+      last_completed_at:
+        description: LastCompletedAt holds the value of the "last_completed_at" field.
+        type: string
+      name:
+        description: Name holds the value of the "name" field.
+        type: string
+      next_due_at:
+        description: NextDueAt holds the value of the "next_due_at" field.
+        type: string
+      updated_at:
+        description: UpdatedAt holds the value of the "updated_at" field.
+        type: string
+    type: object
+  ent.MaintenancePlanEdges:
+    properties:
+      entity:
+        allOf:
+        - $ref: '#/definitions/ent.Entity'
+        description: Entity holds the value of the entity edge.
+      maintenance_entries:
+        description: MaintenanceEntries holds the value of the maintenance_entries
+          edge.
+        items:
+          $ref: '#/definitions/ent.MaintenanceEntry'
+        type: array
     type: object
   ent.Notifier:
     properties:
@@ -1227,6 +1295,20 @@ definitions:
         minimum: 1
         type: integer
     type: object
+  maintenanceplan.IntervalUnit:
+    enum:
+    - hour
+    - day
+    - week
+    - month
+    - year
+    type: string
+    x-enum-varnames:
+    - IntervalUnitHour
+    - IntervalUnitDay
+    - IntervalUnitWeek
+    - IntervalUnitMonth
+    - IntervalUnitYear
   repo.APIKeyCreate:
     properties:
       expiresAt:
@@ -2207,7 +2289,11 @@ definitions:
         type: string
       id:
         type: string
+      isOverdue:
+        type: boolean
       name:
+        type: string
+      planID:
         type: string
       scheduledDate:
         type: string
@@ -2222,6 +2308,8 @@ definitions:
       description:
         type: string
       name:
+        type: string
+      planID:
         type: string
       scheduledDate:
         type: string
@@ -2239,6 +2327,8 @@ definitions:
         type: string
       name:
         type: string
+      planID:
+        type: string
       scheduledDate:
         type: string
     type: object
@@ -2253,11 +2343,15 @@ definitions:
         type: string
       id:
         type: string
+      isOverdue:
+        type: boolean
       itemID:
         type: string
       itemName:
         type: string
       name:
+        type: string
+      planID:
         type: string
       scheduledDate:
         type: string
@@ -2265,13 +2359,92 @@ definitions:
   repo.MaintenanceFilterStatus:
     enum:
     - scheduled
+    - overdue
     - completed
     - both
     type: string
     x-enum-varnames:
     - MaintenanceFilterStatusScheduled
+    - MaintenanceFilterStatusOverdue
     - MaintenanceFilterStatusCompleted
     - MaintenanceFilterStatusBoth
+  repo.MaintenancePlan:
+    properties:
+      active:
+        type: boolean
+      description:
+        type: string
+      id:
+        type: string
+      intervalUnit:
+        $ref: '#/definitions/repo.MaintenancePlanIntervalUnit'
+      intervalValue:
+        type: integer
+      itemID:
+        type: string
+      lastCompletedAt:
+        type: string
+      name:
+        type: string
+      nextDueAt:
+        type: string
+    type: object
+  repo.MaintenancePlanCreate:
+    properties:
+      active:
+        type: boolean
+      completedDate:
+        type: string
+      cost:
+        example: "0"
+        type: string
+      description:
+        type: string
+      intervalUnit:
+        $ref: '#/definitions/repo.MaintenancePlanIntervalUnit'
+      intervalValue:
+        minimum: 1
+        type: integer
+      linkExistingEntryID:
+        type: string
+      name:
+        type: string
+      startDate:
+        type: string
+    required:
+    - intervalUnit
+    - intervalValue
+    - name
+    type: object
+  repo.MaintenancePlanIntervalUnit:
+    enum:
+    - hour
+    - day
+    - week
+    - month
+    - year
+    type: string
+    x-enum-varnames:
+    - MaintenancePlanIntervalUnitHour
+    - MaintenancePlanIntervalUnitDay
+    - MaintenancePlanIntervalUnitWeek
+    - MaintenancePlanIntervalUnitMonth
+    - MaintenancePlanIntervalUnitYear
+  repo.MaintenancePlanUpdate:
+    properties:
+      active:
+        type: boolean
+      description:
+        type: string
+      intervalUnit:
+        $ref: '#/definitions/repo.MaintenancePlanIntervalUnit'
+      intervalValue:
+        type: integer
+      name:
+        type: string
+      nextDueAt:
+        type: string
+    type: object
   repo.NotifierCreate:
     properties:
       isActive:
@@ -3416,6 +3589,7 @@ paths:
         type: string
       - enum:
         - scheduled
+        - overdue
         - completed
         - both
         in: query
@@ -3423,6 +3597,7 @@ paths:
         type: string
         x-enum-varnames:
         - MaintenanceFilterStatusScheduled
+        - MaintenanceFilterStatusOverdue
         - MaintenanceFilterStatusCompleted
         - MaintenanceFilterStatusBoth
       produces:
@@ -3462,6 +3637,53 @@ paths:
       security:
       - Bearer: []
       summary: Create Maintenance Entry
+      tags:
+      - Item Maintenance
+  /v1/entities/{id}/maintenance/plans:
+    get:
+      parameters:
+      - description: Item ID
+        in: path
+        name: id
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            items:
+              $ref: '#/definitions/repo.MaintenancePlan'
+            type: array
+      security:
+      - Bearer: []
+      summary: Query Maintenance Plans
+      tags:
+      - Item Maintenance
+    post:
+      parameters:
+      - description: Item ID
+        in: path
+        name: id
+        required: true
+        type: string
+      - description: Plan Data
+        in: body
+        name: payload
+        required: true
+        schema:
+          $ref: '#/definitions/repo.MaintenancePlanCreate'
+      produces:
+      - application/json
+      responses:
+        "201":
+          description: Created
+          schema:
+            $ref: '#/definitions/repo.MaintenancePlan'
+      security:
+      - Bearer: []
+      summary: Create Maintenance Plan
       tags:
       - Item Maintenance
   /v1/entities/{id}/path:
@@ -4419,6 +4641,7 @@ paths:
       parameters:
       - enum:
         - scheduled
+        - overdue
         - completed
         - both
         in: query
@@ -4426,6 +4649,7 @@ paths:
         type: string
         x-enum-varnames:
         - MaintenanceFilterStatusScheduled
+        - MaintenanceFilterStatusOverdue
         - MaintenanceFilterStatusCompleted
         - MaintenanceFilterStatusBoth
       produces:
@@ -4483,6 +4707,49 @@ paths:
       security:
       - Bearer: []
       summary: Update Maintenance Entry
+      tags:
+      - Maintenance
+  /v1/maintenance/plans/{id}:
+    delete:
+      parameters:
+      - description: Plan ID
+        in: path
+        name: id
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "204":
+          description: No Content
+      security:
+      - Bearer: []
+      summary: Delete Maintenance Plan
+      tags:
+      - Maintenance
+    put:
+      parameters:
+      - description: Plan ID
+        in: path
+        name: id
+        required: true
+        type: string
+      - description: Plan Data
+        in: body
+        name: payload
+        required: true
+        schema:
+          $ref: '#/definitions/repo.MaintenancePlanUpdate'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/repo.MaintenancePlan'
+      security:
+      - Bearer: []
+      summary: Update Maintenance Plan
       tags:
       - Maintenance
   /v1/notifiers:

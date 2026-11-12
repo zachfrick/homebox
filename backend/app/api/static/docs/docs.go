@@ -951,12 +951,14 @@ const docTemplate = `{
                     {
                         "enum": [
                             "scheduled",
+                            "overdue",
                             "completed",
                             "both"
                         ],
                         "type": "string",
                         "x-enum-varnames": [
                             "MaintenanceFilterStatusScheduled",
+                            "MaintenanceFilterStatusOverdue",
                             "MaintenanceFilterStatusCompleted",
                             "MaintenanceFilterStatusBoth"
                         ],
@@ -1012,6 +1014,82 @@ const docTemplate = `{
                         "description": "Created",
                         "schema": {
                             "$ref": "#/definitions/repo.MaintenanceEntry"
+                        }
+                    }
+                }
+            }
+        },
+        "/v1/entities/{id}/maintenance/plans": {
+            "get": {
+                "security": [
+                    {
+                        "Bearer": []
+                    }
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "Item Maintenance"
+                ],
+                "summary": "Query Maintenance Plans",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Item ID",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "type": "array",
+                            "items": {
+                                "$ref": "#/definitions/repo.MaintenancePlan"
+                            }
+                        }
+                    }
+                }
+            },
+            "post": {
+                "security": [
+                    {
+                        "Bearer": []
+                    }
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "Item Maintenance"
+                ],
+                "summary": "Create Maintenance Plan",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Item ID",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "description": "Plan Data",
+                        "name": "payload",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/repo.MaintenancePlanCreate"
+                        }
+                    }
+                ],
+                "responses": {
+                    "201": {
+                        "description": "Created",
+                        "schema": {
+                            "$ref": "#/definitions/repo.MaintenancePlan"
                         }
                     }
                 }
@@ -2437,12 +2515,14 @@ const docTemplate = `{
                     {
                         "enum": [
                             "scheduled",
+                            "overdue",
                             "completed",
                             "both"
                         ],
                         "type": "string",
                         "x-enum-varnames": [
                             "MaintenanceFilterStatusScheduled",
+                            "MaintenanceFilterStatusOverdue",
                             "MaintenanceFilterStatusCompleted",
                             "MaintenanceFilterStatusBoth"
                         ],
@@ -2459,6 +2539,76 @@ const docTemplate = `{
                                 "$ref": "#/definitions/repo.MaintenanceEntryWithDetails"
                             }
                         }
+                    }
+                }
+            }
+        },
+        "/v1/maintenance/plans/{id}": {
+            "put": {
+                "security": [
+                    {
+                        "Bearer": []
+                    }
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "Maintenance"
+                ],
+                "summary": "Update Maintenance Plan",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Plan ID",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "description": "Plan Data",
+                        "name": "payload",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/repo.MaintenancePlanUpdate"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/repo.MaintenancePlan"
+                        }
+                    }
+                }
+            },
+            "delete": {
+                "security": [
+                    {
+                        "Bearer": []
+                    }
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "Maintenance"
+                ],
+                "summary": "Delete Maintenance Plan",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Plan ID",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "204": {
+                        "description": "No Content"
                     }
                 }
             }
@@ -4185,6 +4335,13 @@ const docTemplate = `{
                         "$ref": "#/definitions/ent.MaintenanceEntry"
                     }
                 },
+                "maintenance_plans": {
+                    "description": "MaintenancePlans holds the value of the maintenance_plans edge.",
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/ent.MaintenancePlan"
+                    }
+                },
                 "parent": {
                     "description": "Parent holds the value of the parent edge.",
                     "allOf": [
@@ -4834,6 +4991,10 @@ const docTemplate = `{
                     "description": "Name holds the value of the \"name\" field.",
                     "type": "string"
                 },
+                "plan_id": {
+                    "description": "PlanID holds the value of the \"plan_id\" field.",
+                    "type": "string"
+                },
                 "scheduled_date": {
                     "description": "ScheduledDate holds the value of the \"scheduled_date\" field.",
                     "type": "string"
@@ -4854,6 +5015,95 @@ const docTemplate = `{
                             "$ref": "#/definitions/ent.Entity"
                         }
                     ]
+                },
+                "plan": {
+                    "description": "Plan holds the value of the plan edge.",
+                    "allOf": [
+                        {
+                            "$ref": "#/definitions/ent.MaintenancePlan"
+                        }
+                    ]
+                }
+            }
+        },
+        "ent.MaintenancePlan": {
+            "type": "object",
+            "properties": {
+                "active": {
+                    "description": "Active holds the value of the \"active\" field.",
+                    "type": "boolean"
+                },
+                "created_at": {
+                    "description": "CreatedAt holds the value of the \"created_at\" field.",
+                    "type": "string"
+                },
+                "description": {
+                    "description": "Description holds the value of the \"description\" field.",
+                    "type": "string"
+                },
+                "edges": {
+                    "description": "Edges holds the relations/edges for other nodes in the graph.\nThe values are being populated by the MaintenancePlanQuery when eager-loading is set.",
+                    "allOf": [
+                        {
+                            "$ref": "#/definitions/ent.MaintenancePlanEdges"
+                        }
+                    ]
+                },
+                "entity_id": {
+                    "description": "EntityID holds the value of the \"entity_id\" field.",
+                    "type": "string"
+                },
+                "id": {
+                    "description": "ID of the ent.",
+                    "type": "string"
+                },
+                "interval_unit": {
+                    "description": "IntervalUnit holds the value of the \"interval_unit\" field.",
+                    "allOf": [
+                        {
+                            "$ref": "#/definitions/maintenanceplan.IntervalUnit"
+                        }
+                    ]
+                },
+                "interval_value": {
+                    "description": "IntervalValue holds the value of the \"interval_value\" field.",
+                    "type": "integer"
+                },
+                "last_completed_at": {
+                    "description": "LastCompletedAt holds the value of the \"last_completed_at\" field.",
+                    "type": "string"
+                },
+                "name": {
+                    "description": "Name holds the value of the \"name\" field.",
+                    "type": "string"
+                },
+                "next_due_at": {
+                    "description": "NextDueAt holds the value of the \"next_due_at\" field.",
+                    "type": "string"
+                },
+                "updated_at": {
+                    "description": "UpdatedAt holds the value of the \"updated_at\" field.",
+                    "type": "string"
+                }
+            }
+        },
+        "ent.MaintenancePlanEdges": {
+            "type": "object",
+            "properties": {
+                "entity": {
+                    "description": "Entity holds the value of the entity edge.",
+                    "allOf": [
+                        {
+                            "$ref": "#/definitions/ent.Entity"
+                        }
+                    ]
+                },
+                "maintenance_entries": {
+                    "description": "MaintenanceEntries holds the value of the maintenance_entries edge.",
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/ent.MaintenanceEntry"
+                    }
                 }
             }
         },
@@ -5497,6 +5747,23 @@ const docTemplate = `{
                     "minimum": 1
                 }
             }
+        },
+        "maintenanceplan.IntervalUnit": {
+            "type": "string",
+            "enum": [
+                "hour",
+                "day",
+                "week",
+                "month",
+                "year"
+            ],
+            "x-enum-varnames": [
+                "IntervalUnitHour",
+                "IntervalUnitDay",
+                "IntervalUnitWeek",
+                "IntervalUnitMonth",
+                "IntervalUnitYear"
+            ]
         },
         "repo.APIKeyCreate": {
             "type": "object",
@@ -6892,7 +7159,13 @@ const docTemplate = `{
                 "id": {
                     "type": "string"
                 },
+                "isOverdue": {
+                    "type": "boolean"
+                },
                 "name": {
+                    "type": "string"
+                },
+                "planID": {
                     "type": "string"
                 },
                 "scheduledDate": {
@@ -6919,6 +7192,9 @@ const docTemplate = `{
                 "name": {
                     "type": "string"
                 },
+                "planID": {
+                    "type": "string"
+                },
                 "scheduledDate": {
                     "type": "string"
                 }
@@ -6938,6 +7214,9 @@ const docTemplate = `{
                     "type": "string"
                 },
                 "name": {
+                    "type": "string"
+                },
+                "planID": {
                     "type": "string"
                 },
                 "scheduledDate": {
@@ -6961,6 +7240,9 @@ const docTemplate = `{
                 "id": {
                     "type": "string"
                 },
+                "isOverdue": {
+                    "type": "boolean"
+                },
                 "itemID": {
                     "type": "string"
                 },
@@ -6968,6 +7250,9 @@ const docTemplate = `{
                     "type": "string"
                 },
                 "name": {
+                    "type": "string"
+                },
+                "planID": {
                     "type": "string"
                 },
                 "scheduledDate": {
@@ -6979,14 +7264,127 @@ const docTemplate = `{
             "type": "string",
             "enum": [
                 "scheduled",
+                "overdue",
                 "completed",
                 "both"
             ],
             "x-enum-varnames": [
                 "MaintenanceFilterStatusScheduled",
+                "MaintenanceFilterStatusOverdue",
                 "MaintenanceFilterStatusCompleted",
                 "MaintenanceFilterStatusBoth"
             ]
+        },
+        "repo.MaintenancePlan": {
+            "type": "object",
+            "properties": {
+                "active": {
+                    "type": "boolean"
+                },
+                "description": {
+                    "type": "string"
+                },
+                "id": {
+                    "type": "string"
+                },
+                "intervalUnit": {
+                    "$ref": "#/definitions/repo.MaintenancePlanIntervalUnit"
+                },
+                "intervalValue": {
+                    "type": "integer"
+                },
+                "itemID": {
+                    "type": "string"
+                },
+                "lastCompletedAt": {
+                    "type": "string"
+                },
+                "name": {
+                    "type": "string"
+                },
+                "nextDueAt": {
+                    "type": "string"
+                }
+            }
+        },
+        "repo.MaintenancePlanCreate": {
+            "type": "object",
+            "required": [
+                "intervalUnit",
+                "intervalValue",
+                "name"
+            ],
+            "properties": {
+                "active": {
+                    "type": "boolean"
+                },
+                "completedDate": {
+                    "type": "string"
+                },
+                "cost": {
+                    "type": "string",
+                    "example": "0"
+                },
+                "description": {
+                    "type": "string"
+                },
+                "intervalUnit": {
+                    "$ref": "#/definitions/repo.MaintenancePlanIntervalUnit"
+                },
+                "intervalValue": {
+                    "type": "integer",
+                    "minimum": 1
+                },
+                "linkExistingEntryID": {
+                    "type": "string"
+                },
+                "name": {
+                    "type": "string"
+                },
+                "startDate": {
+                    "type": "string"
+                }
+            }
+        },
+        "repo.MaintenancePlanIntervalUnit": {
+            "type": "string",
+            "enum": [
+                "hour",
+                "day",
+                "week",
+                "month",
+                "year"
+            ],
+            "x-enum-varnames": [
+                "MaintenancePlanIntervalUnitHour",
+                "MaintenancePlanIntervalUnitDay",
+                "MaintenancePlanIntervalUnitWeek",
+                "MaintenancePlanIntervalUnitMonth",
+                "MaintenancePlanIntervalUnitYear"
+            ]
+        },
+        "repo.MaintenancePlanUpdate": {
+            "type": "object",
+            "properties": {
+                "active": {
+                    "type": "boolean"
+                },
+                "description": {
+                    "type": "string"
+                },
+                "intervalUnit": {
+                    "$ref": "#/definitions/repo.MaintenancePlanIntervalUnit"
+                },
+                "intervalValue": {
+                    "type": "integer"
+                },
+                "name": {
+                    "type": "string"
+                },
+                "nextDueAt": {
+                    "type": "string"
+                }
+            }
         },
         "repo.NotifierCreate": {
             "type": "object",
