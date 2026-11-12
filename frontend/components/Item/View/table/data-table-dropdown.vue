@@ -22,6 +22,26 @@
   const confirm = useConfirm();
   const preferences = useViewPreferences();
   const { openDialog } = useDialog();
+  const { isQuickPrintAvailable, quickPrintItems } = useQuickPrint();
+
+  const isQuickPrinting = ref(false);
+
+  async function handleQuickPrint(itemIds: string[]) {
+    isQuickPrinting.value = true;
+    try {
+      const success = await quickPrintItems(itemIds);
+      if (success) {
+        toast.success(t("components.item.view.table.dropdown.quick_print_success"));
+      } else {
+        // Should not happen if isQuickPrintAvailable is true, but fallback to dialog
+        openDialog(DialogID.PrintLabelTemplate, { params: { itemIds } });
+      }
+    } catch (e) {
+      toast.error(t("components.item.view.table.dropdown.quick_print_failed"), { description: (e as Error).message });
+    } finally {
+      isQuickPrinting.value = false;
+    }
+  }
 
   const props = defineProps<{
     item?: EntitySummary;
@@ -44,7 +64,7 @@
     emit("refresh");
   };
 
-  const openMultiTab = async (items: string[]) => {
+  const openMultiTab = async (items: EntitySummary[]) => {
     if (!preferences.value.shownMultiTabWarning) {
       // TODO: add warning with link to docs and just improve this
       const { isCanceled } = await confirm.open({
@@ -57,10 +77,10 @@
       preferences.value.shownMultiTabWarning = true;
     }
 
-    items.forEach(item => window.open(`/item/${item}`, "_blank"));
+    items.forEach(item => window.open(`/${item.entityType?.isLocation ? "location" : "item"}/${item.id}`, "_blank"));
   };
 
-  const downloadCsv = (items: Row<ItemSummary>[], columns: Column<ItemSummary>[]) => {
+  const downloadCsv = (items: Row<EntitySummary>[], columns: Column<EntitySummary>[]) => {
     // get enabled columns
     const enabledColumns = columns.filter(c => c.id !== undefined && c.getIsVisible() && c.getCanHide()).map(c => c.id);
 
@@ -69,7 +89,7 @@
 
     // map each item to a row matching enabled columns order, escaping each field
     const rows = items.map(item =>
-      enabledColumns.map(col => formatValueAsCsvField(item.original[col as keyof ItemSummary])).join(",")
+      enabledColumns.map(col => formatValueAsCsvField(item.original[col as keyof EntitySummary])).join(",")
     );
 
     const csv = [header, ...rows].join("\n");
@@ -169,11 +189,11 @@
       <DropdownMenuLabel>{{ t("components.item.view.table.dropdown.actions") }}</DropdownMenuLabel>
       <DropdownMenuSeparator />
       <DropdownMenuItem v-if="item" as-child>
-        <NuxtLink :to="`/item/${item.id}`" class="hover:underline">
+        <NuxtLink :to="`/${item.entityType?.isLocation ? 'location' : 'item'}/${item.id}`" class="hover:underline">
           {{ t("components.item.view.table.dropdown.view_item") }}
         </NuxtLink>
       </DropdownMenuItem>
-      <DropdownMenuItem v-if="multi" @click="openMultiTab(multi.items.map(row => row.original.id))">
+      <DropdownMenuItem v-if="multi" @click="openMultiTab(multi.items.map(row => row.original))">
         {{ t("components.item.view.table.dropdown.view_items") }}
       </DropdownMenuItem>
       <DropdownMenuItem v-if="view === 'table'" @click="$emit('expand')">
@@ -241,6 +261,32 @@
           multi
             ? t("components.item.view.table.dropdown.duplicate_selected")
             : t("components.item.view.table.dropdown.duplicate_item")
+        }}
+      </DropdownMenuItem>
+      <!-- quick print (default template and server label printer configured) -->
+      <DropdownMenuItem
+        v-if="isQuickPrintAvailable"
+        :disabled="isQuickPrinting"
+        @click="handleQuickPrint(multi ? multi.items.map(row => row.original.id) : [item!.id])"
+      >
+        {{
+          multi
+            ? t("components.item.view.table.dropdown.quick_print_selected")
+            : t("components.item.view.table.dropdown.quick_print_item")
+        }}
+      </DropdownMenuItem>
+      <!-- print labels (with dialog) -->
+      <DropdownMenuItem
+        @click="
+          openDialog(DialogID.PrintLabelTemplate, {
+            params: { itemIds: multi ? multi.items.map(row => row.original.id) : [item!.id] },
+          })
+        "
+      >
+        {{
+          multi
+            ? t("components.item.view.table.dropdown.print_labels_selected")
+            : t("components.item.view.table.dropdown.print_label_item")
         }}
       </DropdownMenuItem>
       <!-- delete -->

@@ -30,6 +30,8 @@ import (
 	"github.com/sysadminsmedia/homebox/backend/pkgs/utils"
 	"github.com/zeebo/blake3"
 	"go.opentelemetry.io/otel"
+
+	entsql "entgo.io/ent/dialect/sql"
 	"golang.org/x/image/draw"
 
 	"gocloud.dev/blob"
@@ -126,7 +128,17 @@ func ToItemAttachment(attachment *ent.Attachment) ItemAttachment {
 // This ensures consistent path separators for blob storage which expects forward slashes
 func normalizePath(path string) string {
 	path = strings.ReplaceAll(path, "\\", "/")
-	return strings.Trim(path, "/")
+	path = strings.Trim(path, "/")
+
+	// Validate against path traversal sequences for defense-in-depth
+	for _, segment := range strings.Split(path, "/") {
+		if segment == ".." {
+			log.Warn().Str("path", path).Msg("path traversal attempt detected")
+			return ""
+		}
+	}
+
+	return path
 }
 
 // legacyFlatPathToken is the gocloud fileblob escape sequence for a backslash
@@ -560,10 +572,35 @@ func (r *AttachmentRepo) Delete(ctx context.Context, gid uuid.UUID, id uuid.UUID
 	}
 	// If this is the last attachment for this path, delete the file
 	if len(all) == 1 {
-		thumb, err := doc.QueryThumbnail().First(ctx)
+		// Only follow the thumbnail edge to a row whose blob lives under this
+		// group's prefix. The attachment_thumbnail FK is id-only, so a row
+		// that was linked to another group's thumbnail (e.g. via a crafted
+		// import) must not be able to delete that group's blob or row.
+		thumb, err := doc.QueryThumbnail().
+			Where(attachment.PathHasPrefix(gid.String() + "/")).
+			First(ctx)
 		if err != nil && !ent.IsNotFound(err) {
 			log.Err(err).Msg("failed to query thumbnail for attachment")
 			return err
+		}
+		if thumb != nil {
+			// If any other attachment row still points at this thumbnail,
+			// just unlink ours and leave the shared row and blob alone.
+			others, err := r.db.Attachment.Query().
+				Where(
+					attachment.IDNEQ(doc.ID),
+					func(s *entsql.Selector) {
+						s.Where(entsql.EQ(s.C(attachment.ThumbnailColumn), thumb.ID))
+					},
+				).
+				Count(ctx)
+			if err != nil {
+				return err
+			}
+			if others > 0 {
+				_ = doc.Update().SetNillableThumbnailID(nil).SaveX(ctx)
+				thumb = nil
+			}
 		}
 		if thumb != nil {
 			thumbBucket, err := blob.OpenBucket(ctx, r.GetConnString())
@@ -625,8 +662,11 @@ func (r *AttachmentRepo) CreateThumbnail(ctx context.Context, groupId, attachmen
 	log.Debug().Msg("starting thumbnail creation")
 	tx, err := r.db.Tx(ctx)
 	if err != nil {
-		return nil
+		return err
 	}
+	// Always end the transaction, whatever the return path
+	// After a successful Commit this is a no-op (returns sql.ErrTxDone)
+	defer func() { _ = tx.Rollback() }()
 	// If there is an error during file creation rollback the database
 	defer func() {
 		if v := recover(); v != nil {
@@ -861,7 +901,7 @@ func (r *AttachmentRepo) CreateThumbnail(ctx context.Context, groupId, attachmen
 	log.Debug().Msg("finishing thumbnail creation transaction")
 	if err := tx.Commit(); err != nil {
 		log.Err(err).Msg("failed to commit transaction")
-		return nil
+		return err
 	}
 	return nil
 }

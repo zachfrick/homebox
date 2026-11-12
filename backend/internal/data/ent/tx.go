@@ -34,6 +34,8 @@ type Tx struct {
 	Group *GroupClient
 	// GroupInvitationToken is the client for interacting with the GroupInvitationToken builders.
 	GroupInvitationToken *GroupInvitationTokenClient
+	// LabelTemplate is the client for interacting with the LabelTemplate builders.
+	LabelTemplate *LabelTemplateClient
 	// MaintenanceEntry is the client for interacting with the MaintenanceEntry builders.
 	MaintenanceEntry *MaintenanceEntryClient
 	// MaintenancePlan is the client for interacting with the MaintenancePlan builders.
@@ -192,6 +194,7 @@ func (tx *Tx) init() {
 	tx.Export = NewExportClient(tx.config)
 	tx.Group = NewGroupClient(tx.config)
 	tx.GroupInvitationToken = NewGroupInvitationTokenClient(tx.config)
+	tx.LabelTemplate = NewLabelTemplateClient(tx.config)
 	tx.MaintenanceEntry = NewMaintenanceEntryClient(tx.config)
 	tx.MaintenancePlan = NewMaintenancePlanClient(tx.config)
 	tx.Notifier = NewNotifierClient(tx.config)

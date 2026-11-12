@@ -5,8 +5,10 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"net"
 	"net/url"
 	"os"
+	"strings"
 	"time"
 
 	"github.com/ardanlabs/conf/v3"
@@ -62,6 +64,75 @@ type Config struct {
 	Otel       OTelConfig     `yaml:"otel"`
 	Auth       AuthConfig     `yaml:"auth"`
 	Notifier   NotifierConf   `yaml:"notifier"`
+	Search     SearchConf     `yaml:"search"`
+}
+
+// SearchConf selects and configures the free-text search engine. The default
+// "database" driver searches directly in SQLite/PostgreSQL and needs no extra
+// services. The "meilisearch" driver delegates matching to an external
+// Meilisearch instance for typo-tolerant, relevance-ranked search.
+type SearchConf struct {
+	Driver      string          `yaml:"driver"      conf:"default:database"`
+	Meilisearch MeilisearchConf `yaml:"meilisearch"`
+}
+
+// MeilisearchConf configures the connection to a Meilisearch instance when
+// SearchConf.Driver is "meilisearch".
+type MeilisearchConf struct {
+	Host   string `yaml:"host"    conf:"default:http://localhost:7700"`
+	APIKey string `yaml:"api_key"`
+	// Index is the Meilisearch index uid entities are stored in.
+	Index string `yaml:"index" conf:"default:homebox_entities"`
+	// MaxHits caps how many matching entity IDs a single search retrieves
+	// from Meilisearch before the database applies its own filters and
+	// pagination.
+	MaxHits int64 `yaml:"max_hits" conf:"default:1000"`
+}
+
+func (c MeilisearchConf) MarshalJSON() ([]byte, error) {
+	type alias MeilisearchConf
+	a := alias(c)
+	if a.APIKey != "" {
+		a.APIKey = redactedValue
+	}
+	return json.Marshal(a)
+}
+
+// Validate enforces secure transport for the Meilisearch connection. The API
+// key is sent on every request, so a non-local endpoint reached over plaintext
+// http would leak it on the wire. https is always allowed; http is permitted
+// only for loopback and private addresses (see IsLocalNetworkIP). A literal IP host is checked here; a hostname (e.g. a
+// Docker Compose service name) can only be checked once resolved, so the
+// Meilisearch client enforces the same rule on every connection it dials.
+func (c MeilisearchConf) Validate() error {
+	if c.Host == "" {
+		return errors.New("search.meilisearch.host must not be empty")
+	}
+	u, err := url.Parse(c.Host)
+	if err != nil {
+		return fmt.Errorf("search.meilisearch.host is not a valid URL: %w", err)
+	}
+	switch u.Scheme {
+	case "https":
+		return nil
+	case "http":
+		if u.Hostname() == "" {
+			return errors.New("search.meilisearch.host must include a hostname")
+		}
+		if ip := net.ParseIP(u.Hostname()); ip != nil && !IsLocalNetworkIP(ip) {
+			return fmt.Errorf("search.meilisearch.host uses insecure http for non-local host %q: use https", u.Host)
+		}
+		return nil
+	default:
+		return fmt.Errorf("search.meilisearch.host has unsupported scheme %q: must be http or https", u.Scheme)
+	}
+}
+
+// IsLocalNetworkIP reports whether ip is a loopback address or a private
+// address (RFC 1918 IPv4 or RFC 4193 IPv6 unique local), i.e. a destination
+// plaintext http may be used for.
+func IsLocalNetworkIP(ip net.IP) bool {
+	return ip.IsLoopback() || ip.IsPrivate()
 }
 
 type Options struct {
@@ -188,6 +259,30 @@ type AuthRateLimit struct {
 	MaxBackoff  time.Duration `yaml:"max_backoff"  conf:"default:5m"`
 }
 
+// loadEnvFiles sets <prefix>_<NAME> from the contents of the file named by <prefix>_<NAME>_FILE,
+// so secrets can be supplied as files (Docker/Kubernetes secrets, systemd credentials) instead of
+// plain environment variables. The _FILE variant takes precedence, and trailing newlines are trimmed.
+func loadEnvFiles(prefix string) error {
+	for _, kv := range os.Environ() {
+		key, path, _ := strings.Cut(kv, "=")
+		name, ok := strings.CutSuffix(key, "_FILE")
+		if !ok || !strings.HasPrefix(name, prefix+"_") {
+			continue
+		}
+
+		data, err := os.ReadFile(path)
+		if err != nil {
+			return fmt.Errorf("reading %s: %w", key, err)
+		}
+
+		if err := os.Setenv(name, strings.TrimRight(string(data), "\r\n")); err != nil {
+			return fmt.Errorf("setting %s from %s: %w", name, key, err)
+		}
+	}
+
+	return nil
+}
+
 // New parses the CLI/Config file and returns a Config struct. If the file argument is an empty string, the
 // file is not read. If the file is not empty, the file is read and the Config struct is returned.
 func New(buildstr string, description string) (*Config, error) {
@@ -199,6 +294,10 @@ func New(buildstr string, description string) (*Config, error) {
 		Desc:  description,
 	}
 
+	if err := loadEnvFiles(prefix); err != nil {
+		return &cfg, fmt.Errorf("loading config from files: %w", err)
+	}
+
 	help, err := conf.Parse(prefix, &cfg)
 	if err != nil {
 		if errors.Is(err, conf.ErrHelpWanted) {
@@ -206,6 +305,14 @@ func New(buildstr string, description string) (*Config, error) {
 			os.Exit(0)
 		}
 		return &cfg, fmt.Errorf("parsing config: %w", err)
+	}
+
+	// Only enforce Meilisearch transport rules when that driver is selected;
+	// the unused default host is otherwise irrelevant.
+	if cfg.Search.Driver == "meilisearch" {
+		if err := cfg.Search.Meilisearch.Validate(); err != nil {
+			return &cfg, fmt.Errorf("invalid meilisearch config: %w", err)
+		}
 	}
 
 	return &cfg, nil
